@@ -2,5 +2,6 @@
 
 from backend.agents.ingestion.apple_health import AppleHealthParser
 from backend.agents.ingestion.base import WearableParser
+from backend.agents.ingestion.fitbit import FitbitParser
 
-__all__ = ["WearableParser", "AppleHealthParser"]
+__all__ = ["WearableParser", "AppleHealthParser", "FitbitParser"]
