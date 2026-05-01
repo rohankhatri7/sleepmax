@@ -1,11 +1,13 @@
 """Context vector query and fetch endpoints."""
 
+import dataclasses
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.agents.context import orchestrator as orch
 from backend.agents.context.weather import WeatherAdapter
 from backend.api.schemas import DailyContextOut, WeatherRequest
 from backend.config import settings
@@ -63,3 +65,23 @@ async def fetch_weather(
     await session.refresh(ctx)
 
     return {"status": "ok", "date": req.date.isoformat(), "weather": weather_data}
+
+
+@router.post("/sync", response_model=dict)
+async def sync_context(
+    target_date: date = Query(..., alias="date", description="Date to orchestrate"),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Manually run the context orchestrator for a date.
+
+    Returns 200 with a summary of which adapters ran, were skipped, or failed.
+    """
+    result = await orch.orchestrate(
+        target_date,
+        session,
+        lat=settings.default_latitude,
+        lon=settings.default_longitude,
+    )
+    payload = dataclasses.asdict(result)
+    payload["date"] = result.date.isoformat()
+    return payload

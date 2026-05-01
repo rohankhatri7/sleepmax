@@ -5,16 +5,20 @@ engine derived from `settings.database_url_sync` to keep the worker code
 straightforward — no async event-loop juggling inside the task body.
 """
 
+import asyncio
+import dataclasses
 import logging
 import os
-from datetime import datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 
 from sqlalchemy import create_engine, literal_column, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.agents.context.exercise import aggregate_workouts_by_day
+from backend.agents.context.orchestrator import orchestrate
 from backend.agents.ingestion.apple_health import AppleHealthParser
 from backend.agents.ingestion.base import ParseResult
 from backend.config import settings
@@ -89,6 +93,45 @@ def _persist(session: Session, parsed: ParseResult) -> dict:
         "sessions_updated": updated,
         "workout_days": len(rollup),
     }
+
+
+_async_engine = None
+_AsyncSessionLocal = None
+
+
+def _get_async_session_factory() -> async_sessionmaker[AsyncSession]:
+    global _async_engine, _AsyncSessionLocal
+    if _AsyncSessionLocal is None:
+        _async_engine = create_async_engine(settings.database_url, future=True)
+        _AsyncSessionLocal = async_sessionmaker(
+            _async_engine, class_=AsyncSession, expire_on_commit=False
+        )
+    return _AsyncSessionLocal
+
+
+async def _run_orchestrator(target: date) -> dict:
+    factory = _get_async_session_factory()
+    async with factory() as session:
+        result = await orchestrate(
+            target,
+            session,
+            lat=settings.default_latitude,
+            lon=settings.default_longitude,
+        )
+    payload = dataclasses.asdict(result)
+    payload["date"] = result.date.isoformat()
+    return payload
+
+
+@app.task(name="backend.tasks.sync_context")
+def sync_context(date_iso: str | None = None) -> dict:
+    """Run the context orchestrator for a date (default: yesterday UTC)."""
+    target = (
+        date.fromisoformat(date_iso)
+        if date_iso
+        else (datetime.now(timezone.utc).date() - timedelta(days=1))
+    )
+    return asyncio.run(_run_orchestrator(target))
 
 
 @app.task(bind=True, name="backend.tasks.parse_apple_health")
