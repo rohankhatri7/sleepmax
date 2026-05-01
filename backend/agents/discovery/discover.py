@@ -72,6 +72,9 @@ DEFAULT_MIN_N = 10
 DEFAULT_MIN_BIN_N = 5
 DEFAULT_NUM_BINS = 4
 DEFAULT_P_THRESHOLD = 0.05
+# Cross-correlation threshold above which two context variables are treated as
+# confounded (per HARD_PROBLEMS_AND_PITFALLS §"Confounds will mislead you").
+CONFOUND_R_THRESHOLD = 0.6
 # Below this n, the day-of-week residualization eats too many degrees of
 # freedom (7 DOW levels) so we skip it and use raw values.
 DOW_RESIDUALIZE_MIN_N = 14
@@ -92,6 +95,8 @@ class PatternResult:
     description: str
     n: int
     confidence_label: str  # emerging | strong | very_strong
+    confound_flag: bool = False
+    confounded_with: tuple[str, ...] = ()
 
 
 # ----------------------------------------------------------------------
@@ -355,6 +360,38 @@ def _best_binning(
     )
 
 
+def _context_cross_correlations(
+    context_df: pd.DataFrame,
+    fields: Iterable[str],
+    threshold: float = CONFOUND_R_THRESHOLD,
+) -> dict[str, tuple[str, ...]]:
+    """Pairwise Pearson |r| over context columns; map field -> tuple of fields it's confounded with.
+
+    Pairs with fewer than DEFAULT_MIN_N joint observations or zero variance are
+    skipped. We use Pearson on the raw values (not residualized) — this is a
+    coarse "are these two signals collinear" check, not an inference test.
+    """
+    available = [f for f in fields if f in context_df.columns]
+    if len(available) < 2:
+        return {f: () for f in available}
+
+    confounds: dict[str, set[str]] = {f: set() for f in available}
+    for i, a in enumerate(available):
+        for b in available[i + 1:]:
+            sub = context_df[[a, b]].dropna()
+            if len(sub) < DEFAULT_MIN_N:
+                continue
+            if sub[a].nunique() < 2 or sub[b].nunique() < 2:
+                continue
+            r = float(pearsonr(sub[a].to_numpy(dtype=float), sub[b].to_numpy(dtype=float)).statistic)
+            if not np.isfinite(r):
+                continue
+            if abs(r) > threshold:
+                confounds[a].add(b)
+                confounds[b].add(a)
+    return {f: tuple(sorted(others)) for f, others in confounds.items()}
+
+
 # ----------------------------------------------------------------------
 # Main entry point
 # ----------------------------------------------------------------------
@@ -388,6 +425,10 @@ def discover_patterns(
     if len(sleep_df) == 0 or len(context_df) == 0:
         return []
 
+    # Compute pairwise context correlations once per run; results annotate every
+    # downstream pattern that touches a confounded variable.
+    confound_map = _context_cross_correlations(context_df, context_fields)
+
     table = _build_lagged_table(sleep_df, context_df)
 
     candidates: list[PatternResult] = []
@@ -415,6 +456,11 @@ def discover_patterns(
         c.confidence_label = _confidence_label(c.n, c.p_value)
 
     significant = [c for c in candidates if c.p_value < p_threshold and c.n >= min_n]
+    for c in significant:
+        partners = confound_map.get(c.context_field, ())
+        if partners:
+            c.confounded_with = partners
+            c.confound_flag = True
     significant.sort(
         key=lambda c: abs(c.correlation) * -math.log10(max(c.p_value, 1e-12)),
         reverse=True,

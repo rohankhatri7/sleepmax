@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Date, DateTime, Float, Index, Integer, LargeBinary, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, Float, Index, Integer, LargeBinary, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -136,6 +136,11 @@ class DiscoveredPattern(Base):
     lag_days: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     threshold: Mapped[str | None] = mapped_column(String(100), nullable=True)
     confidence_label: Mapped[str] = mapped_column(String(20), nullable=False, default="emerging")
+
+    # Added by 0006_confound_flag
+    confound_flag: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # JSON array of context_field names this pattern's variable is correlated with at |r|>0.6
+    confounded_with: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow

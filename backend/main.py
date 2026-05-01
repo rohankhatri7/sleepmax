@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from backend.api.routes import auth, context, insights, sleep, upload
+from backend.api.routes import auth, context, insights, patterns, sleep, upload
 from backend.config import settings
 
 logging.basicConfig(
@@ -32,6 +32,7 @@ app.include_router(sleep.router)
 app.include_router(context.router)
 app.include_router(auth.router)
 app.include_router(insights.router)
+app.include_router(patterns.router)
 
 
 @app.get("/health")

@@ -1,5 +1,7 @@
 """Persistence helper for Agent 3 pattern discovery results."""
 
+import json
+
 from sqlalchemy.orm import Session
 
 from backend.agents.discovery.discover import PatternResult
@@ -30,6 +32,10 @@ def persist_patterns(patterns: list[PatternResult], session: Session) -> int:
             lag_days=p.lag_days,
             threshold=p.threshold,
             confidence_label=p.confidence_label,
+            confound_flag=p.confound_flag,
+            confounded_with=(
+                json.dumps(list(p.confounded_with)) if p.confounded_with else None
+            ),
         )
         for p in patterns
     ]
